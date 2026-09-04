@@ -335,7 +335,7 @@ export default function App() {
             </div>
           </div>
           <div style={{ textAlign: 'center', padding: '16px', borderTop: `1px solid ${C.border}`, background: C.surface }}>
-            <p style={{ fontSize: 12, color: C.light }}>© 2026 Seven Hills Enterprises · fusionpalette9@gmail.com</p>
+            <p style={{ fontSize: 12, color: C.light }}>© 2026 Seven Hills Enterprises · svn7hillsenterprises@gmail.com</p>
           </div>
         </div>
       )}
