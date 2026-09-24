@@ -1,213 +1,541 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  createUserWithEmailAndPassword,
-  signInWithEmailAndPassword,
-  signOut,
-  onAuthStateChanged,
-  User,
-  GoogleAuthProvider,
-  signInWithPopup,
-  sendPasswordResetEmail,
-  sendEmailVerification,
+  createUserWithEmailAndPassword, signInWithEmailAndPassword,
+  signOut, onAuthStateChanged, User, GoogleAuthProvider,
+  signInWithPopup, sendPasswordResetEmail, sendEmailVerification,
   updateProfile
 } from 'firebase/auth';
 import {
-  collection, addDoc, getDocs, query,
-  where, serverTimestamp, doc, setDoc, getDoc
+  collection, addDoc, getDocs, query, where, serverTimestamp,
+  doc, setDoc, getDoc, onSnapshot, orderBy, updateDoc,
+  increment, deleteDoc
 } from 'firebase/firestore';
 import { auth, db } from './firebase';
+import {
+  C, Story, Wound, DriftEntry, Profile, RoomMessage,
+  CURATED_STORIES, STORY_CHAPTERS, DEFAULT_CHAPTERS,
+  GENRES, DRIFT_STATES, COVERS, GRADIENTS, ROULETTE_OPENINGS
+} from './types';
+import { Screens } from './Screens';
 
-// ── COLORS ───────────────────────────────────────────────────────────────────
-const C = {
-  bg:'#fdf6ee', surface:'#fff9f2', card:'#ffffff',
-  border:'#e8d9c5', accent:'#c97b3b', accentL:'#f5e4d0',
-  text:'#2c1a0e', mid:'#6b4c35', light:'#9c7a60', hero:'#f7ede0',
-  green:'#4a7a4a', greenBg:'#e8f4e8', red:'#c0392b', redBg:'#fdf0ee'
-};
-
-// ── SAMPLE STORIES ───────────────────────────────────────────────────────────
-const SAMPLE_STORIES = [
-  { id:'1', title:'Vaan Mugiludu', author:'Priya Lakshmi', genre:'Romance', lang:'Telugu', cover:'🌧️', grad:'linear-gradient(135deg,#e8b4b8,#c97b8a)', desc:'Aakaasham gurinchi cheppindi — manchi vaanalu kooda oka roju aagipotaayi.', tags:['emotional','second chance'], lateNight:true, chapters:5 },
-  { id:'2', title:'The Last Cartographer', author:'Eira Blackwood', genre:'Fantasy', lang:'English', cover:'🗺️', grad:'linear-gradient(135deg,#a8c5da,#6b8fa8)', desc:'In a world where maps are prophecy, she discovers something never meant to be found.', tags:['fantasy','magic'], lateNight:false, chapters:5 },
-  { id:'3', title:'Static', author:'Noor Anand', genre:'Mystery', lang:'English', cover:'📻', grad:'linear-gradient(135deg,#b5c9a8,#7a9b6e)', desc:'A radio host receives calls from someone who should not be able to call.', tags:['thriller','supernatural'], lateNight:true, chapters:5 },
-  { id:'4', title:'Soft Machinery', author:'Theo Marsh', genre:'Sci-Fi', lang:'English', cover:'🤖', grad:'linear-gradient(135deg,#c5b8d4,#8b7aab)', desc:'In 2087, grief counselors are replaced by androids. One starts to grieve.', tags:['sci-fi','emotional'], lateNight:true, chapters:5 },
-  { id:'5', title:'Velugu Telinappudu', author:'Kavitha Rao', genre:'Literary', lang:'Telugu', cover:'🌺', grad:'linear-gradient(135deg,#ddc4a0,#b89060)', desc:'Moodu taragala ammayilu, oka paata intlo, gurtu telusukovalante.', tags:['family','Telugu'], lateNight:true, chapters:5 },
-  { id:'6', title:'Boy With Glass Hands', author:'Sable Quinn', genre:'YA', lang:'English', cover:'✨', grad:'linear-gradient(135deg,#a8d4d8,#6aabaf)', desc:'He can see through people. She is the first one he cannot read.', tags:['YA','romance'], lateNight:false, chapters:5 },
-];
-
-// ── CHAPTER CONTENT (different per chapter) ───────────────────────────────────
-const CHAPTERS: Record<number, string[]> = {
-  1:[
-    "She had learned to love the rain because he had learned to leave in it. Every monsoon after, she stood at the window and tried to remember which year she had stopped waiting.",
-    "The cafe bell made the same old sound. Three notes and then silence before the world rushed back in. She stood at the threshold longer than she should have.",
-    "He was in the corner booth. Of course he was. Fifteen years and he was still there with a book face-down and coffee he had let go cold. Some habits are architecture.",
-    "She could leave. She had gotten very good at leaving. But her feet had already made the decision her heart was still debating.",
-    "He looked up. And all those rehearsed words dissolved like sugar in rain.",
-  ],
-  2:[
-    "She found the letter on a Tuesday morning, tucked beneath the door like a secret the house had been keeping. No stamp. No return address. Just her name in handwriting she had spent fifteen years trying to forget.",
-    "Inside: three words. That was all. Three words that undid everything she had carefully constructed in the years since she left.",
-    "She sat on the kitchen floor for a long time. The coffee went cold. The sun moved across the tiles. She did not move.",
-    "By afternoon she had made a decision. By evening she had packed a bag. By midnight she was driving through rain that felt like a conversation she had not finished.",
-    "The town appeared at the edge of her headlights like a memory she had been trying to outrun.",
-  ],
-  3:[
-    "He was not supposed to be here. She had been very careful about that. She had mapped every street to make sure their paths would not cross.",
-    "And yet here he was. Standing in the cereal aisle of all places, looking at the back of a box with the same concentration he used to give to her.",
-    "She should have turned around. Instead she stood there watching him, the way you watch a fire you know will burn you.",
-    "They met eyes over seventeen feet of fluorescent light and the particular silence that happens when two people who once knew each other very well pretend they do not.",
-    "He said her name. Just that. And she felt the last fifteen years rearrange themselves around that one syllable.",
-  ],
-  4:[
-    "They had coffee. Of course they had coffee. What else do you do with fifteen years of unsaid things.",
-    "He talked about his work. She talked about hers. They were very good at talking about everything except the thing.",
-    "Then he said: I kept every letter you never sent.",
-    "She set down her cup very carefully. The way you set down something you are afraid of breaking. Or something already broken.",
-    "She said: How did you know about the letters. He said: Because I wrote them too.",
-  ],
-  5:[
-    "They walked for a long time after that. The city moved around them and they moved through it the way people move through dreams.",
-    "She told him about the years. He told her about the years. They were not the same years even though they had been living them at the same time in different places.",
-    "At some point the walking stopped and the standing started and the standing became the kind of standing that is really just two people being afraid to leave.",
-    "She thought: some distances cannot be crossed twice.",
-    "She thought: and then again — maybe they can.",
-  ],
-};
-
-const CH_TITLES = ['The Beginning','The Letter','The Meeting','The Coffee','The Walk'];
-const DRIFT_STATES = ['Something I have never said out loud','A version of me I had forgotten','A feeling I could not name until now','Someone I used to be','Something I am still waiting for','A grief I have not finished yet','A joy I was afraid to want'];
-const GENRES = ['Romance','Fantasy','Mystery','Sci-Fi','Literary','YA','Horror','Poetry'];
-const GRADIENTS = ['linear-gradient(135deg,#e8b4b8,#c97b8a)','linear-gradient(135deg,#a8c5da,#6b8fa8)','linear-gradient(135deg,#c5b8d4,#8b7aab)','linear-gradient(135deg,#b5c9a8,#7a9b6e)','linear-gradient(135deg,#ddc4a0,#b89060)'];
-const COVERS = ['✍️','📖','🌟','💫','🌸','🎭','🔮','🦋'];
-
-// ── TYPES ─────────────────────────────────────────────────────────────────────
-interface Story { id:string; title:string; author:string; genre:string; lang:string; cover:string; grad:string; desc:string; tags:string[]; lateNight:boolean; chapters:number; authorId?:string; }
-interface Wound { id:string; quote:string; book:string; author:string; date:string; others:number; grad:string; }
-interface DriftEntry { id:string; book:string; state:string; letter:string; date:string; shared:boolean; }
-interface Profile { name:string; email:string; bio:string; reads:number; streak:number; joined:string; }
-
-// ── BUTTON ────────────────────────────────────────────────────────────────────
-const Btn = ({ children, onClick, sx={} }:{ children:React.ReactNode; onClick?:()=>void; sx?:React.CSSProperties; }) => (
-  <button onClick={onClick} style={{ border:'none', cursor:'pointer', fontFamily:'Georgia,serif', transition:'all 0.15s', ...sx }}>{children}</button>
-);
-
-// ── STORY CARD ────────────────────────────────────────────────────────────────
-function StoryCard({ s, onOpen }:{ s:Story; onOpen:(s:Story)=>void }) {
-  return (
-    <div onClick={()=>onOpen(s)} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:15, overflow:'hidden', cursor:'pointer', transition:'all 0.2s' }}>
-      <div style={{ height:150, background:s.grad, display:'flex', alignItems:'center', justifyContent:'center', position:'relative' }}>
-        <span style={{ fontSize:36 }}>{s.cover}</span>
-        <div style={{ position:'absolute', top:7, left:7, display:'flex', gap:3, flexWrap:'wrap' }}>
-          <span style={{ fontSize:10, background:'rgba(255,255,255,0.88)', padding:'2px 7px', borderRadius:18, fontWeight:700, color:'#6b4c35' }}>{s.genre}</span>
-          {s.lang==='Telugu' && <span style={{ fontSize:10, background:'rgba(255,255,255,0.88)', padding:'2px 7px', borderRadius:18, fontWeight:700, color:'#4a7a4a' }}>తె</span>}
-          {s.lateNight && <span style={{ fontSize:10, background:'rgba(0,0,0,0.6)', padding:'2px 7px', borderRadius:18, fontWeight:700, color:'#d4956a' }}>🌙</span>}
-        </div>
-      </div>
-      <div style={{ padding:'10px 12px 12px' }}>
-        <p style={{ fontSize:13, fontWeight:800, lineHeight:1.3, marginBottom:3, color:C.text }}>{s.title}</p>
-        <p style={{ fontSize:11, color:C.light, marginBottom:5 }}>{s.author}</p>
-        <p style={{ fontSize:11, color:C.mid, lineHeight:1.5 }}>{s.desc.slice(0,65)}…</p>
-      </div>
-    </div>
-  );
+export interface AppState {
+  user: User | null;
+  profile: Profile | null;
+  stories: Story[];
+  wounds: Wound[];
+  driftEntries: DriftEntry[];
+  following: string[];
+  likedStories: string[];
+  readingList: string[];
+  readingProgress: Record<string, number>;
+  userRatings: Record<string, number>;
+  view: string;
+  story: Story | null;
+  readingCh: number | null;
+  roomReaderCount: number;
+  roomMessages: RoomMessage[];
+  chapterComments: any[];
+  toast: string | null;
+  tourStep: number | null;
+  showWoundPrompt: boolean;
+  selectedText: string | null;
+  showPostCh: boolean;
+  draftBody: string;
+  draftTitle: string;
+  draftGenre: string;
+  draftLang: string;
+  readerFontSize: number;
+  readerNightMode: boolean;
+  searchQuery: string;
+  genreFilter: string;
+  rouletteIdx: number | null;
+  rouletteTimer: number;
+  writerAuthor: string | null;
+  driftState: string;
+  driftLetter: string;
+  driftShared: boolean;
+  newComment: string;
+  roomMsg: string;
+  editBio: string;
+  editingBio: boolean;
+  editUsername: string;
+  editingUsername: boolean;
+  authMode: 'signin' | 'signup' | 'forgot' | 'phone';
+  form: { name: string; email: string; password: string; username: string };
+  authError: string;
+  authLoading: boolean;
+  forgotSent: boolean;
+  showPass: boolean;
+  isNewStory: boolean;
 }
 
-// ── APP ───────────────────────────────────────────────────────────────────────
 export default function App() {
-  const [user, setUser]               = useState<User|null>(null);
+  const [user, setUser]               = useState<User | null>(null);
   const [loading, setLoading]         = useState(true);
-  const [view, setView]               = useState('landing');
-  const [story, setStory]             = useState<Story|null>(null);
-  const [readingCh, setReadingCh]     = useState<number|null>(null);
-  const [stories, setStories]         = useState<Story[]>(SAMPLE_STORIES);
+  const [profile, setProfile]         = useState<Profile | null>(null);
+  const [stories, setStories]         = useState<Story[]>(CURATED_STORIES);
   const [wounds, setWounds]           = useState<Wound[]>([]);
   const [driftEntries, setDriftEntries] = useState<DriftEntry[]>([]);
-  const [profile, setProfile]         = useState<Profile|null>(null);
-  const [selectedText, setSelectedText] = useState<string|null>(null);
+  const [following, setFollowing]     = useState<string[]>([]);
+  const [likedStories, setLikedStories] = useState<string[]>([]);
+  const [readingList, setReadingList] = useState<string[]>([]);
+  const [readingProgress, setReadingProgress] = useState<Record<string,number>>({});
+  const [userRatings, setUserRatings] = useState<Record<string,number>>({});
+  const [view, setView]               = useState('landing');
+  const [story, setStory]             = useState<Story | null>(null);
+  const [readingCh, setReadingCh]     = useState<number | null>(null);
+  const [roomReaderCount, setRoomReaderCount] = useState(0);
+  const [roomMessages, setRoomMessages] = useState<RoomMessage[]>([]);
+  const [chapterComments, setChapterComments] = useState<any[]>([]);
+  const [toast, setToast]             = useState<string | null>(null);
+  const [tourStep, setTourStep]       = useState<number | null>(null);
   const [showWoundPrompt, setShowWoundPrompt] = useState(false);
+  const [selectedText, setSelectedText] = useState<string | null>(null);
   const [showPostCh, setShowPostCh]   = useState(false);
-  const [toast, setToast]             = useState<string|null>(null);
-  const [tourStep, setTourStep]       = useState<number|null>(null);
-
-  // Auth form
+  const [draftBody, setDraftBody]     = useState('');
+  const [draftTitle, setDraftTitle]   = useState('');
+  const [draftGenre, setDraftGenre]   = useState('Romance');
+  const [draftLang, setDraftLang]     = useState('English');
+  const [readerFontSize, setReaderFontSize] = useState(17);
+  const [readerNightMode, setReaderNightMode] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [genreFilter, setGenreFilter] = useState('All');
+  const [rouletteIdx, setRouletteIdx] = useState<number | null>(null);
+  const [rouletteTimer, setRouletteTimer] = useState(0);
+  const [writerAuthor, setWriterAuthor] = useState<string | null>(null);
+  const [driftState, setDriftState]   = useState('');
+  const [driftLetter, setDriftLetter] = useState('');
+  const [driftShared, setDriftShared] = useState(false);
+  const [newComment, setNewComment]   = useState('');
+  const [roomMsg, setRoomMsg]         = useState('');
+  const [editBio, setEditBio]         = useState('');
+  const [editingBio, setEditingBio]   = useState(false);
+  const [editUsername, setEditUsername] = useState('');
+  const [editingUsername, setEditingUsername] = useState(false);
   const [authMode, setAuthMode]       = useState<'signin'|'signup'|'forgot'|'phone'>('signin');
-  const [form, setForm]               = useState({ name:'', email:'', password:'', phone:'' });
+  const [form, setForm]               = useState({ name:'', email:'', password:'', username:'' });
   const [authError, setAuthError]     = useState('');
   const [authLoading, setAuthLoading] = useState(false);
   const [forgotSent, setForgotSent]   = useState(false);
   const [showPass, setShowPass]       = useState(false);
+  const [isNewStory, setIsNewStory]   = useState(true);
 
-  // Write
-  const [writeTitle, setWriteTitle]   = useState('');
-  const [writeBody, setWriteBody]     = useState('');
-  const [writeGenre, setWriteGenre]   = useState('Romance');
-  const [writeLang, setWriteLang]     = useState('English');
+  const readerBodyRef = useRef<HTMLDivElement>(null);
+  const rouletteRef   = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Phase 1 — Search, Follow, Likes, Progress, Comments, Share
-  const [searchQuery, setSearchQuery]     = useState('');
-  const [genreFilter, setGenreFilter]     = useState('All');
-  const [following, setFollowing]         = useState<string[]>([]);
-  const [likedStories, setLikedStories]   = useState<string[]>([]);
-  const [readingProgress, setReadingProgress] = useState<Record<string,number>>({});
-  const [chapterComments, setChapterComments] = useState<any[]>([]);
-  const [newComment, setNewComment]       = useState('');
-
-  // Drift
-  const [driftState, setDriftState]   = useState('');
-  const [driftLetter, setDriftLetter] = useState('');
-  const [driftShared, setDriftShared] = useState(false);
-
-  // Profile edit
-  const [editBio, setEditBio]         = useState('');
-  const [editingBio, setEditingBio]   = useState(false);
-
-  // Phase 2 — Night reader, Font size, Ratings, Writer profile, Reading list, Writer dashboard
-  const [readerNightMode, setReaderNightMode]   = useState(false);
-  const [readerFontSize, setReaderFontSize]     = useState(17);
-  const [storyRating, setStoryRating]           = useState<Record<string,number>>({});
-  const [userRating, setUserRating]             = useState<Record<string,number>>({});
-  const [writerAuthor, setWriterAuthor]         = useState<string|null>(null);
-  const [readingList, setReadingList]           = useState<string[]>([]);
-  const [writerStats, setWriterStats]           = useState<Record<string,any>>({});
-
+  // ── AUTH LISTENER ──────────────────────────────────────────────────────────
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (u) => {
       setUser(u);
       setLoading(false);
-      if (u) { setView('home'); await loadUserData(u); await loadPhase2Data(u); }
+      if (u) { setView('home'); loadUserData(u); }
     });
     return unsub;
   }, []);
 
-  const showToast = (msg:string) => { setToast(msg); setTimeout(()=>setToast(null), 2800); };
-  const validateEmail = (e:string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
+  // ── REAL-TIME READING ROOM ─────────────────────────────────────────────────
+  useEffect(() => {
+    if (readingCh === null || !story || !user) return;
+    const roomId = `${story.id}_ch${readingCh}`;
+    const presenceRef = doc(db, 'rooms', roomId, 'presence', user.uid);
+    setDoc(presenceRef, { name: profile?.name || 'Reader', joinedAt: serverTimestamp() }).catch(() => {});
+    const presenceUnsub = onSnapshot(collection(db, 'rooms', roomId, 'presence'),
+      snap => setRoomReaderCount(snap.size), () => setRoomReaderCount(0));
+    const chatUnsub = onSnapshot(
+      query(collection(db, 'rooms', roomId, 'chat'), orderBy('sentAt', 'asc')),
+      snap => setRoomMessages(snap.docs.map(d => ({ id: d.id, ...d.data() } as RoomMessage))),
+      () => {}
+    );
+    return () => { deleteDoc(presenceRef).catch(() => {}); presenceUnsub(); chatUnsub(); };
+  }, [readingCh, story?.id]);
 
-  const loadUserData = async (u:User) => {
+  // ── SCROLL TO TOP ON CHAPTER CHANGE ───────────────────────────────────────
+  useEffect(() => {
+    if (readerBodyRef.current) readerBodyRef.current.scrollTop = 0;
+  }, [readingCh]);
+
+  const showToast = useCallback((msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 2800);
+  }, []);
+
+  const validateEmail = (e: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
+
+  // ── LOAD USER DATA ─────────────────────────────────────────────────────────
+  const loadUserData = async (u: User) => {
     try {
-      const pd = await getDoc(doc(db,'users',u.uid));
+      const pd = await getDoc(doc(db, 'users', u.uid));
       if (pd.exists()) {
-        const data = pd.data() as Profile & { following?:string[]; likedStories?:string[] };
+        const data = pd.data() as Profile;
         setProfile(data);
-        setFollowing(data.following||[]);
-        setLikedStories(data.likedStories||[]);
+        setFollowing(data.following || []);
+        setLikedStories(data.likedStories || []);
+        setReadingList(data.readingList || []);
       }
-      const wSnap = await getDocs(query(collection(db,'wounds'), where('userId','==',u.uid)));
-      setWounds(wSnap.docs.map(d=>({id:d.id,...d.data()} as Wound)));
-      const dSnap = await getDocs(query(collection(db,'drift'), where('userId','==',u.uid)));
-      setDriftEntries(dSnap.docs.map(d=>({id:d.id,...d.data()} as DriftEntry)));
-      const sSnap = await getDocs(collection(db,'stories'));
-      if (!sSnap.empty) {
-        const userStories = sSnap.docs.map(d=>({id:d.id,...d.data()} as Story)).filter(s=>s.authorId);
-        setStories([...SAMPLE_STORIES, ...userStories]);
-      }
-      // Load reading progress
-      const pSnap = await getDocs(query(collection(db,'progress'), where('userId','==',u.uid)));
-      const prog:Record<string,number> = {};
+      const [wSnap, dSnap, sSnap, pSnap, rSnap] = await Promise.all([
+        getDocs(query(collection(db, 'wounds'), where('userId', '==', u.uid))),
+        getDocs(query(collection(db, 'drift'), where('userId', '==', u.uid))),
+        getDocs(collection(db, 'stories')),
+        getDocs(query(collection(db, 'progress'), where('userId', '==', u.uid))),
+        getDocs(query(collection(db, 'ratings'), where('userId', '==', u.uid))),
+      ]);
+      setWounds(wSnap.docs.map(d => ({ id: d.id, ...d.data() } as Wound)));
+      setDriftEntries(dSnap.docs.map(d => ({ id: d.id, ...d.data() } as DriftEntry)));
+      const userStories = sSnap.docs.map(d => ({ id: d.id, ...d.data() } as Story)).filter(s => s.authorId);
+      if (userStories.length > 0) setStories([...CURATED_STORIES, ...userStories]);
+      const prog: Record<string, number> = {};
       pSnap.docs.forEach(d => { const data = d.data(); prog[data.storyId] = data.chapter; });
       setReadingProgress(prog);
-    } catch(e) { console.log('Load error:',e); }
+      const ratings: Record<string, number> = {};
+      rSnap.docs.forEach(d => { const data = d.data(); ratings[data.storyId] = data.rating; });
+      setUserRatings(ratings);
+    } catch (e) { console.log('Load error:', e); }
   };
 
+  // ── AUTH ───────────────────────────────────────────────────────────────────
+  const signUp = async () => {
+    setAuthError('');
+    if (!form.name.trim()) return setAuthError('Please enter your name.');
+    if (!form.username.trim()) return setAuthError('Please choose a username.');
+    if (!/^[a-z0-9_]{3,20}$/.test(form.username)) return setAuthError('Username: 3-20 chars, lowercase letters, numbers, underscores only.');
+    if (!validateEmail(form.email)) return setAuthError('Please enter a valid email address.');
+    if (form.password.length < 6) return setAuthError('Password must be at least 6 characters.');
+    setAuthLoading(true);
+    try {
+      const result = await createUserWithEmailAndPassword(auth, form.email, form.password);
+      await updateProfile(result.user, { displayName: form.name });
+      const p: Profile = {
+        name: form.name, username: form.username, email: form.email,
+        bio: 'New to Storyverse ✨', reads: 0, streak: 0,
+        joined: new Date().toLocaleDateString('en-IN'),
+      };
+      await setDoc(doc(db, 'users', result.user.uid), p);
+      await sendEmailVerification(result.user);
+      setProfile(p);
+      setForm({ name: '', email: '', password: '', username: '' });
+      setTourStep(0);
+      showToast('Welcome! Check your email to verify your account 📧');
+    } catch (e: any) {
+      if (e.code === 'auth/email-already-in-use') setAuthError('This email is already registered. Sign in instead.');
+      else setAuthError(e.message || 'Something went wrong.');
+    }
+    setAuthLoading(false);
+  };
+
+  const signIn = async () => {
+    setAuthError('');
+    if (!validateEmail(form.email)) return setAuthError('Please enter a valid email address.');
+    if (!form.password) return setAuthError('Please enter your password.');
+    setAuthLoading(true);
+    try {
+      await signInWithEmailAndPassword(auth, form.email, form.password);
+      setForm({ name: '', email: '', password: '', username: '' });
+      showToast('Welcome back! 📖');
+    } catch (e: any) {
+      if (e.code === 'auth/user-not-found') setAuthError('No account found with this email.');
+      else if (e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential') setAuthError('Incorrect password. Try again or reset it.');
+      else setAuthError('Sign in failed. Please try again.');
+    }
+    setAuthLoading(false);
+  };
+
+  const googleSignIn = async () => {
+    setAuthError('');
+    setAuthLoading(true);
+    try {
+      const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: 'select_account' });
+      let result;
+      try { result = await signInWithPopup(auth, provider); }
+      catch (popupErr: any) {
+        if (popupErr.code === 'auth/popup-blocked' || popupErr.code === 'auth/popup-closed-by-user') {
+          const { signInWithRedirect } = await import('firebase/auth');
+          await signInWithRedirect(auth, provider); return;
+        }
+        throw popupErr;
+      }
+      const pd = await getDoc(doc(db, 'users', result.user.uid));
+      if (!pd.exists()) {
+        const p: Profile = {
+          name: result.user.displayName || 'Reader',
+          username: result.user.email?.split('@')[0].replace(/[^a-z0-9_]/g, '_').slice(0, 20) || 'reader',
+          email: result.user.email || '', bio: 'New to Storyverse ✨',
+          reads: 0, streak: 0, joined: new Date().toLocaleDateString('en-IN'),
+        };
+        await setDoc(doc(db, 'users', result.user.uid), p);
+        setProfile(p); setTourStep(0);
+      }
+      setForm({ name: '', email: '', password: '', username: '' });
+      showToast('Signed in with Google! 🎉');
+    } catch (e: any) {
+      if (e.code === 'auth/unauthorized-domain') setAuthError('Add your Vercel domain to Firebase Auth → Settings → Authorized domains.');
+      else setAuthError('Google sign in failed. Try email/password instead.');
+    }
+    setAuthLoading(false);
+  };
+
+  const forgotPassword = async () => {
+    setAuthError('');
+    if (!validateEmail(form.email)) return setAuthError('Please enter a valid email address.');
+    setAuthLoading(true);
+    try {
+      await sendPasswordResetEmail(auth, form.email);
+      setForgotSent(true);
+      showToast('Reset email sent! Check your inbox and spam folder 📧');
+    } catch (e: any) {
+      if (e.code === 'auth/user-not-found') setAuthError('No account with this email. Check spelling or sign up.');
+      else if (e.code === 'auth/too-many-requests') setAuthError('Too many attempts. Wait a few minutes and try again.');
+      else setAuthError('Failed to send email. Make sure this domain is added in Firebase Auth → Settings.');
+    }
+    setAuthLoading(false);
+  };
+
+  const handleSignOut = async () => {
+    await signOut(auth);
+    setView('landing'); setUser(null); setProfile(null);
+    setWounds([]); setDriftEntries([]); setStories(CURATED_STORIES);
+    setFollowing([]); setLikedStories([]); setReadingList([]);
+    showToast('Signed out. See you soon 👋');
+  };
+
+  // ── FEATURE FUNCTIONS ──────────────────────────────────────────────────────
+  const saveWound = async () => {
+    if (!selectedText || !story || !user) return;
+    try {
+      const data = { quote: selectedText, book: story.title, author: story.author, userId: user.uid, date: new Date().toLocaleDateString('en-IN'), others: Math.floor(Math.random() * 500) + 10, grad: story.grad, savedAt: serverTimestamp() };
+      const ref = await addDoc(collection(db, 'wounds'), data);
+      setWounds(p => [{ id: ref.id, ...data } as Wound, ...p]);
+      showToast('Saved to your Wound Store 🩹');
+    } catch { showToast('Error saving wound. Check Firestore rules.'); }
+    setShowWoundPrompt(false); setSelectedText(null);
+  };
+
+  const saveDrift = async () => {
+    if (!driftState) return showToast('Select what this story touched in you.');
+    if (!driftLetter.trim()) return showToast('Write your letter — even one sentence.');
+    if (!user || !story) return;
+    try {
+      const data = { book: story.title, state: driftState, letter: driftLetter.trim(), userId: user.uid, shared: driftShared, date: new Date().toLocaleDateString('en-IN'), savedAt: serverTimestamp() };
+      const ref = await addDoc(collection(db, 'drift'), data);
+      setDriftEntries(p => [{ id: ref.id, ...data } as DriftEntry, ...p]);
+      setDriftState(''); setDriftLetter(''); setDriftShared(false);
+      setShowPostCh(false); setReadingCh(null);
+      showToast('Letter saved to your Drift 🌌');
+      setTimeout(() => navTo('drift'), 400);
+    } catch { showToast('Error saving drift. Check Firestore rules.'); }
+  };
+
+  const publishStory = async () => {
+    if (!draftTitle.trim() || !draftBody.trim() || !user) return showToast('Please fill in title and story.');
+    try {
+      const newStory: any = {
+        title: draftTitle, author: profile?.name || user.email?.split('@')[0] || 'Anonymous',
+        genre: draftGenre, lang: draftLang,
+        cover: COVERS[Math.floor(Math.random() * COVERS.length)],
+        grad: GRADIENTS[Math.floor(Math.random() * GRADIENTS.length)],
+        desc: draftBody.slice(0, 120) + '...', tags: [draftGenre.toLowerCase()],
+        lateNight: false, chapters: 1, authorId: user.uid,
+        body: draftBody, views: 0, reads: '0', savedAt: serverTimestamp(),
+      };
+      const ref = await addDoc(collection(db, 'stories'), newStory);
+      const published = { id: ref.id, ...newStory } as Story;
+      setStories(p => [...p, published]);
+      setDraftTitle(''); setDraftBody(''); setIsNewStory(true);
+      showToast('Published! 🎉 Visible in Browse now.');
+      navTo('browse');
+    } catch { showToast('Error publishing. Check Firestore rules.'); }
+  };
+
+  const followWriter = async (authorName: string) => {
+    if (!user) return;
+    const isFollowing = following.includes(authorName);
+    const updated = isFollowing ? following.filter(f => f !== authorName) : [...following, authorName];
+    setFollowing(updated);
+    try { await setDoc(doc(db, 'users', user.uid), { following: updated }, { merge: true }); showToast(isFollowing ? `Unfollowed ${authorName}` : `Following ${authorName} ✓`); } catch {}
+  };
+
+  const likeStory = async (storyId: string) => {
+    if (!user) return;
+    const isLiked = likedStories.includes(storyId);
+    const updated = isLiked ? likedStories.filter(id => id !== storyId) : [...likedStories, storyId];
+    setLikedStories(updated);
+    try { await setDoc(doc(db, 'users', user.uid), { likedStories: updated }, { merge: true }); showToast(isLiked ? 'Removed from liked' : 'Added to liked ❤️'); } catch {}
+  };
+
+  const toggleReadingList = async (storyId: string) => {
+    if (!user) return;
+    const isIn = readingList.includes(storyId);
+    const updated = isIn ? readingList.filter(id => id !== storyId) : [...readingList, storyId];
+    setReadingList(updated);
+    try { await setDoc(doc(db, 'users', user.uid), { readingList: updated }, { merge: true }); showToast(isIn ? 'Removed from reading list' : 'Added to reading list 📚'); } catch {}
+  };
+
+  const saveProgress = async (storyId: string, chapter: number) => {
+    if (!user) return;
+    setReadingProgress(p => ({ ...p, [storyId]: chapter }));
+    try { await addDoc(collection(db, 'progress'), { userId: user.uid, storyId, chapter, updatedAt: serverTimestamp() }); } catch {}
+  };
+
+  const loadComments = async (storyId: string, chapter: number) => {
+    try {
+      const snap = await getDocs(query(collection(db, 'comments'), where('storyId', '==', storyId), where('chapter', '==', chapter)));
+      setChapterComments(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    } catch {}
+  };
+
+  const postComment = async () => {
+    if (!newComment.trim() || !user || !story || readingCh === null) return;
+    try {
+      const data = { storyId: story.id, chapter: readingCh, userId: user.uid, userName: profile?.username || profile?.name || 'Reader', text: newComment.trim(), date: new Date().toLocaleDateString('en-IN'), savedAt: serverTimestamp() };
+      const ref = await addDoc(collection(db, 'comments'), data);
+      setChapterComments(p => [...p, { id: ref.id, ...data }]);
+      setNewComment('');
+      showToast('Comment posted ✓');
+    } catch { showToast('Error posting comment.'); }
+  };
+
+  const rateStory = async (storyId: string, rating: number) => {
+    if (!user) return;
+    setUserRatings(p => ({ ...p, [storyId]: rating }));
+    try { await addDoc(collection(db, 'ratings'), { storyId, userId: user.uid, rating, savedAt: serverTimestamp() }); showToast(`Rated ${rating}★`); } catch {}
+  };
+
+  const sendRoomMessage = async () => {
+    if (!roomMsg.trim() || !user || !story || readingCh === null) return;
+    const roomId = `${story.id}_ch${readingCh}`;
+    try { await addDoc(collection(db, 'rooms', roomId, 'chat'), { userId: user.uid, userName: profile?.username || profile?.name || 'Reader', text: roomMsg.trim(), sentAt: serverTimestamp() }); setRoomMsg(''); } catch {}
+  };
+
+  const saveBio = async () => {
+    if (!user) return;
+    try {
+      await setDoc(doc(db, 'users', user.uid), { bio: editBio }, { merge: true });
+      setProfile(p => p ? { ...p, bio: editBio } : null);
+      setEditingBio(false);
+      showToast('Bio updated ✓');
+    } catch { showToast('Error updating bio.'); }
+  };
+
+  const saveUsername = async () => {
+    if (!user) return;
+    if (!/^[a-z0-9_]{3,20}$/.test(editUsername)) return showToast('Username: 3-20 chars, lowercase, numbers, underscores only.');
+    try {
+      await setDoc(doc(db, 'users', user.uid), { username: editUsername }, { merge: true });
+      setProfile(p => p ? { ...p, username: editUsername } : null);
+      setEditingUsername(false);
+      showToast('Username updated ✓');
+    } catch { showToast('Error updating username.'); }
+  };
+
+  const shareToWhatsApp = (s: Story) => {
+    const text = `📖 Found this on Storyverse!\n\n*${s.title}* by ${s.author}\n\n"${s.desc.slice(0, 80)}..."\n\nRead free 👇\nhttps://storyverse-sooty.vercel.app`;
+    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+  };
+
+  const shareStory = (s: Story) => {
+    const text = `📖 ${s.title} by ${s.author} — Read free on Storyverse: storyverse-sooty.vercel.app`;
+    if (navigator.share) navigator.share({ title: s.title, text, url: 'https://storyverse-sooty.vercel.app' }).catch(() => {});
+    else { navigator.clipboard?.writeText(text); showToast('Story link copied! 📋'); }
+  };
+
+  const spinRoulette = () => {
+    if (rouletteRef.current) clearInterval(rouletteRef.current);
+    const idx = Math.floor(Math.random() * ROULETTE_OPENINGS.length);
+    setRouletteIdx(idx);
+    let t = 30;
+    setRouletteTimer(t);
+    rouletteRef.current = setInterval(() => {
+      t--; setRouletteTimer(t);
+      if (t <= 0 && rouletteRef.current) { clearInterval(rouletteRef.current); rouletteRef.current = null; }
+    }, 1000);
+  };
+
+  const openStory = async (s: Story) => {
+    setStory(s); setView('story'); setReadingCh(null);
+    if (s.authorId) { try { await updateDoc(doc(db, 'stories', s.id), { views: increment(1) }); } catch {} }
+  };
+
+  const getArchetype = () => {
+    const w = wounds.length, d = driftEntries.length, r = Object.keys(readingProgress).length, f = following.length, l = likedStories.length;
+    if (w >= 10) return { type: 'The Wound Collector', emoji: '🩹', color: '#c97b8a', desc: 'You highlight more than you read. Your wound store is a museum of sentences that found you.' };
+    if (d >= 5) return { type: 'The Reflective Reader', emoji: '🌌', color: '#8b7aab', desc: 'You process everything you read. Your drift letters are a map of your inner world.' };
+    if (f >= 5) return { type: 'The Community Reader', emoji: '👥', color: '#7a9b6e', desc: 'You read with people in mind. You follow writers. Reading, for you, is a conversation.' };
+    if (l >= 10) return { type: 'The Story Enthusiast', emoji: '❤️', color: '#c97b3b', desc: 'You love broadly and deeply. You like stories the way some people like music — constantly.' };
+    if (r >= 8) return { type: 'The Serial Reader', emoji: '📖', color: '#b89060', desc: 'You are always in the middle of something. You read voraciously.' };
+    if (w === 0 && r === 0 && l === 0) return { type: 'The Wanderer', emoji: '🗺️', color: '#6b8fa8', desc: 'You are just beginning. Every story ahead of you is still possible.' };
+    return { type: 'The Quiet Feeler', emoji: '🍂', color: '#c97b3b', desc: 'You feel things deeply but quietly. You read to make sense of being alive.' };
+  };
+
+  const getChapterContent = (ch: number): string[] => {
+    if (!story) return DEFAULT_CHAPTERS[1];
+    const sc = STORY_CHAPTERS[story.id];
+    if (sc && sc[ch]) return sc[ch];
+    // For user-published stories, show their actual body text
+    if (story.body) return story.body.split('\n\n').filter(p => p.trim()).slice(0, 6);
+    return DEFAULT_CHAPTERS[((ch - 1) % 5) + 1];
+  };
+
+  const navTo = (v: string) => {
+    setView(v); setStory(null); setReadingCh(null); setShowPostCh(false);
+    setSearchQuery(''); setGenreFilter('All');
+  };
+
+  const filteredStories = stories.filter(s => {
+    const matchSearch = searchQuery === '' || s.title.toLowerCase().includes(searchQuery.toLowerCase()) || s.author.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchGenre = genreFilter === 'All' || s.genre === genreFilter;
+    return matchSearch && matchGenre;
+  });
+
+  const wordCount = draftBody.trim() === '' ? 0 : draftBody.trim().split(/\s+/).filter(Boolean).length;
+
+  if (loading) return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: C.bg, fontFamily: 'Georgia,serif' }}>
+      <div style={{ textAlign: 'center' }}>
+        <p style={{ fontSize: 48, marginBottom: 16 }}>📖</p>
+        <p style={{ color: C.accent, fontSize: 18, fontWeight: 700 }}>Loading Storyverse...</p>
+      </div>
+    </div>
+  );
+
+  const state = {
+    user, profile, stories, wounds, driftEntries, following, likedStories,
+    readingList, readingProgress, userRatings, view, story, readingCh,
+    roomReaderCount, roomMessages, chapterComments, toast, tourStep,
+    showWoundPrompt, selectedText, showPostCh, draftBody, draftTitle,
+    draftGenre, draftLang, readerFontSize, readerNightMode, searchQuery,
+    genreFilter, rouletteIdx, rouletteTimer, writerAuthor, driftState,
+    driftLetter, driftShared, newComment, roomMsg, editBio, editingBio,
+    editUsername, editingUsername, authMode, form, authError, authLoading,
+    forgotSent, showPass, isNewStory,
+  };
+
+  const actions = {
+    setView, setStory, setReadingCh, setProfile, setWounds, setDriftEntries,
+    setFollowing, setLikedStories, setReadingList, setTourStep, setShowWoundPrompt,
+    setSelectedText, setShowPostCh, setDraftBody, setDraftTitle, setDraftGenre,
+    setDraftLang, setReaderFontSize, setReaderNightMode, setSearchQuery,
+    setGenreFilter, setRouletteIdx, setRouletteTimer, setWriterAuthor,
+    setDriftState, setDriftLetter, setDriftShared, setNewComment, setRoomMsg,
+    setEditBio, setEditingBio, setEditUsername, setEditingUsername,
+    setAuthMode, setForm, setAuthError, setForgotSent, setShowPass, setIsNewStory,
+    saveWound, saveDrift, publishStory, followWriter, likeStory, toggleReadingList,
+    saveProgress, loadComments, postComment, rateStory, sendRoomMessage,
+    saveBio, saveUsername, shareToWhatsApp, shareStory, spinRoulette,
+    openStory, navTo, showToast, handleSignOut, signUp, signIn,
+    googleSignIn, forgotPassword, getArchetype, getChapterContent,
+    filteredStories, wordCount,
+  };
+
+  return (
+    <Screens
+      state={state}
+      actions={actions}
+      readerBodyRef={readerBodyRef}
+      authMode={authMode}
+      validateEmail={validateEmail}
+    />
+  );
+}
   // ── SIGN UP
   const signUp = async () => {
     setAuthError('');
